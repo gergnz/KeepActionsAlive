@@ -12,10 +12,7 @@ def get_params():
     pat_name = os.getenv("PAT_SECRET_NAME")
     pat = get_pat(pat_name)
 
-    organization = os.getenv("GH_ORGANIZATION")
-    external_repos = os.getenv("EXTERNAL_REPOS")
-
-    return pat, organization, external_repos
+    return pat
 
 
 def get_pat(pat_name):
@@ -25,42 +22,16 @@ def get_pat(pat_name):
 
     return secret_string["PAT"]
 
-
-def get_repos(gh, organization, external_repos):
+def get_user_repos(gh):
     """
-    Get all repos for an organization, and external repos from the config file if the
-    ENV VAR was set.
+    Get all repos for an organization
     """
     repos = []
 
-    org_repos = gh.get_organization(organization).get_repos()
-    valid_repos = [r for r in org_repos if not r.fork and not r.archived]
-    repos += valid_repos
-
-    if external_repos:
-        external_repos = get_external_repos(gh)
-        repos += external_repos
+    user_repos = gh.get_user().get_repos(type="owner")
+    repos = [r for r in user_repos if not r.fork and not r.archived]
 
     return repos
-
-
-def get_external_repos(gh):
-    """
-    Get all external repositories from the `repos.config` file
-    """
-    external_repos = []
-
-    with open("repos.config") as f:
-        content = f.readlines()
-        content = [x.strip() for x in content]
-
-        for entry in content:
-            org_name, repo_name = entry.split('/')
-
-            external_repos.append(gh.get_organization(org_name).get_repo(repo_name))
-
-    return external_repos
-
 
 def get_workflows(repos):
     """
@@ -70,7 +41,7 @@ def get_workflows(repos):
 
     for repo in repos:
         workflows_to_enable = [
-            w for w in repo.get_workflows() if w.state == "disabled_inactivity"
+            w for w in repo.get_workflows() if w.state == "active"
         ]
 
         disabled_workflows += workflows_to_enable
@@ -78,13 +49,15 @@ def get_workflows(repos):
     return disabled_workflows
 
 
-def enable_workflows(pat, workflows):
+def disable_enable_workflows(pat, workflows):
     """
     Enable all the workflows.
     """
     for workflow in workflows:
+        disable_url = f"{workflow.url}/disable"
         enable_url = f"{workflow.url}/enable"
         header = {"Authorization": f"Bearer {pat}"}
+        requests.put(disable_url, headers=header)
         requests.put(enable_url, headers=header)
 
 
@@ -92,12 +65,14 @@ def lambda_handler(event, context):
     """
     Enable all inactive workflows.
     """
-    pat, organization, external_repos = get_params()
+    pat = get_params()
 
     gh = Github(login_or_token=pat)
 
-    repos = get_repos(gh, organization, external_repos)
+    repos = get_user_repos(gh)
     workflows = get_workflows(repos)
-    enable_workflows(pat, workflows)
+    disable_enable_workflows(pat, workflows)
 
     return {"statusCode": 200}
+
+lambda_handler(1,1)
